@@ -1,0 +1,21 @@
+# données
+data/
+datasets/
+*.csv
+*.nii
+*.nii.gz
+
+# entraînement / modèles
+checkpoints/
+runs/
+logs/
+*.pt
+*.pth
+*.ckpt
+
+# python
+__pycache__/
+*.pyc
+
+# notebooks
+.ipynb_checkpoints/
