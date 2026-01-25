@@ -4,7 +4,6 @@ from torch import sigmoid
 
 
 def dice_coeff(input: Tensor, target: Tensor, reduce_batch_first: bool = False, epsilon: float = 1e-6):
-    # Average of Dice coefficient for all batches, or for a single mask
     target = target.float()
 
 
@@ -78,7 +77,26 @@ def dice_eval(
 
 
 
-def dice_loss(input: Tensor, target: Tensor, multiclass: bool = False):
-    # Dice loss (objective to minimize) between 0 and 1
-    fn = dice_coeff
-    return 1 - fn(input, target, reduce_batch_first=True)
+
+
+def dice_loss_fg(logits: Tensor, target: Tensor, eps: float = 1e-6) -> Tensor:
+    # logits/target: [B,1,H,W]
+    if logits.dim() == 3: logits = logits.unsqueeze(1)
+    if target.dim() == 3: target = target.unsqueeze(1)
+    target = target.float()
+
+    prob = torch.sigmoid(logits)
+
+    dims = (1,2,3)
+    gt_sum = target.sum(dim=dims)             
+    valid = gt_sum > 0                         
+
+    if valid.sum() == 0:
+        # no tumor in batch -> no dice signal
+        return torch.tensor(0.0, device=logits.device)
+
+    inter = (prob * target).sum(dim=dims)      
+    denom = prob.sum(dim=dims) + gt_sum        
+    dice = (2*inter + eps) / (denom + eps)     
+    return 1 - dice[valid].mean()
+
