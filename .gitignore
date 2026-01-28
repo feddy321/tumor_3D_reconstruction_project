@@ -12,6 +12,7 @@ logs/
 *.pt
 *.pth
 *.ckpt
+wandb/
 
 # python
 __pycache__/
