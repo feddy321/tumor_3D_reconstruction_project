@@ -14,6 +14,10 @@ logs/
 *.ckpt
 wandb/
 
+# optuna 
+optuna/
+optuna*.db
+
 # python
 __pycache__/
 *.pyc
@@ -22,6 +26,11 @@ __pycache__/
 .ipynb_checkpoints/
 
 # fichiers d'environnement
+.env
+.venv
 .python-version
 uv.lock
 pyproject.toml
+
+# fichier macOS
+.DS_Store

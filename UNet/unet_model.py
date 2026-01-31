@@ -4,7 +4,7 @@ from .unet_parts import *
 
 
 class UNet(nn.Module):
-    def __init__(self, n_channels, n_classes, bilinear=False):
+    def __init__(self, n_channels, n_classes, bilinear=False, dropout=0.0):
         super(UNet, self).__init__()
         self.n_channels = n_channels
         self.n_classes = n_classes
@@ -15,8 +15,8 @@ class UNet(nn.Module):
         self.down2 = (Down(128, 256))
         self.down3 = (Down(256, 512))
         factor = 2 if bilinear else 1
-        self.down4 = (Down(512, 1024 // factor))
-        self.up1 = (Up(1024, 512 // factor, bilinear))
+        self.down4 = (Down(512, 1024 // factor, dropout=dropout))
+        self.up1 = (Up(1024, 512 // factor, bilinear, dropout=dropout))
         self.up2 = (Up(512, 256 // factor, bilinear))
         self.up3 = (Up(256, 128 // factor, bilinear))
         self.up4 = (Up(128, 64, bilinear))
