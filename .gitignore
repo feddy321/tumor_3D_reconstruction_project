@@ -20,3 +20,8 @@ __pycache__/
 
 # notebooks
 .ipynb_checkpoints/
+
+# fichiers d'environnement
+.python-version
+uv.lock
+pyproject.toml
