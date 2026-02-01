@@ -21,16 +21,12 @@ class SmoothingConfig:
     method:
       - "none"
       - "gaussian_3d"        : skimage.filters.gaussian on the 3D prob volume
-      - "z_moving_average"   : fast moving-average along Z only
       - "z_gaussian"         : gaussian smoothing along Z only (uses scipy if available, else falls back)
     """
     method: str = "none"
 
     # gaussian_3d
     sigma_xyz: Union[float, Tuple[float, float, float]] = 1.0  # sigma for (X,Y,Z) array
-
-    # z_moving_average
-    z_window: int = 3  # must be odd
 
     # z_gaussian
     z_sigma: float = 1.0
@@ -221,19 +217,6 @@ class Out_unet_to_nii:
             # skimage gaussian supports nD. preserve_range=True avoids internal rescaling.
             p2 = sk_gaussian(p, sigma=cfg.sigma_xyz, preserve_range=True)
             return np.clip(p2.astype(np.float32), 0.0, 1.0)
-
-        if method == "z_moving_average":
-            w = int(cfg.z_window)
-            if w < 1 or w % 2 == 0:
-                raise ValueError("z_window must be a positive odd integer.")
-            # Fast moving average along Z using cumulative sum
-            pad = w // 2
-            p_pad = np.pad(p, ((0, 0), (0, 0), (pad, pad)), mode="edge")
-            csum = np.cumsum(p_pad, axis=2, dtype=np.float64)
-            # window sum: csum[z+w] - csum[z]
-            out = (csum[:, :, w:] - csum[:, :, :-w]) / float(w)
-            print("out shape:", out.shape)
-            return np.clip(out.astype(np.float32), 0.0, 1.0)
 
         if method == "z_gaussian":
             # Prefer scipy if available (fast). Otherwise fall back to manual convolution.
@@ -499,40 +482,58 @@ class Out_unet_to_nii:
     # -------------------------
 
     @staticmethod
-    def eval_diff_volume_relative(path_ground_truth_nii: str, path_predicted_nii: str) -> Dict[str, float]:
+    def eval_diff_volume_relative(
+        path_ground_truth_nii: str,
+        path_predicted_nii: str,
+        tumor_label: int = 2
+    ) -> Dict[str, float]:
         """
-        Compute relative volume difference between GT and prediction.
-        Checks:
-          - same shape (same number of slices and same in-plane size)
-          - same affine (np.allclose)
-          - both binary masks (0/1)
+        Compute relative volume difference between GT tumor (label == tumor_label)
+        and predicted tumor mask.
+
+        Steps:
+        - keep only GT voxels with label == tumor_label
+        - convert GT to binary (0/1)
+        - ensure prediction is binary (0/1)
+        - check shape and affine consistency
+        - compute physical volumes (mm^3)
 
         Returns dict:
-          - gt_volume_mm3, pred_volume_mm3
-          - diff_mm3 (pred - gt)
-          - rel_diff (pred - gt) / gt   (nan if gt==0)
+        - gt_volume_mm3
+        - pred_volume_mm3
+        - diff_mm3 (pred - gt)
+        - rel_diff (pred - gt) / gt   (nan if gt == 0)
         """
         gt_nii = nib.load(path_ground_truth_nii)
         pr_nii = nib.load(path_predicted_nii)
 
+        # --- Geometry checks ---
         if gt_nii.shape != pr_nii.shape:
-            raise ValueError(f"Shape mismatch: GT {gt_nii.shape} vs Pred {pr_nii.shape}")
+            raise ValueError(
+                f"Shape mismatch: GT {gt_nii.shape} vs Pred {pr_nii.shape}"
+            )
 
         if not np.allclose(gt_nii.affine, pr_nii.affine, atol=1e-5):
-            raise ValueError("Affine mismatch between GT and predicted NIfTI (not aligned).")
+            raise ValueError(
+                "Affine mismatch between GT and predicted NIfTI (not aligned)."
+            )
 
-        gt = np.asarray(gt_nii.get_fdata())
-        pr = np.asarray(pr_nii.get_fdata())
+        # --- Load data ---
+        gt_raw = np.asarray(gt_nii.get_fdata())
+        pr_raw = np.asarray(pr_nii.get_fdata())
 
-        # Accept {0,1} or {0,255} if you want? The user requested binary; enforce strict 0/1.
-        # If your masks are 0/255, convert upstream or uncomment normalization.
-        # gt = (gt > 0).astype(np.uint8)
-        # pr = (pr > 0).astype(np.uint8)
+        # --- Keep only tumor label in GT ---
+        # GT: 2 -> 1 (tumor), everything else -> 0
+        gt = (gt_raw == tumor_label).astype(np.uint8)
 
-        # Strict binary check 0/1
-        Out_unet_to_nii._assert_binary(gt.astype(np.int64), "ground truth")
-        Out_unet_to_nii._assert_binary(pr.astype(np.int64), "predicted")
+        # Predicted mask should already be binary
+        pr = (pr_raw > 0).astype(np.uint8)
 
+        # --- Binary sanity checks ---
+        Out_unet_to_nii._assert_binary(gt, "ground truth (tumor-only)")
+        Out_unet_to_nii._assert_binary(pr, "predicted")
+
+        # --- Volume computation ---
         spacing = gt_nii.header.get_zooms()[:3]
         voxel_vol_mm3 = float(spacing[0] * spacing[1] * spacing[2])
 
@@ -540,7 +541,7 @@ class Out_unet_to_nii:
         pr_vol_mm3 = float(np.sum(pr == 1) * voxel_vol_mm3)
 
         diff_mm3 = pr_vol_mm3 - gt_vol_mm3
-        rel_diff = np.nan if gt_vol_mm3 == 0 else (diff_mm3 / gt_vol_mm3)
+        rel_diff = np.nan if gt_vol_mm3 == 0 else diff_mm3 / gt_vol_mm3
 
         return {
             "gt_volume_mm3": gt_vol_mm3,
@@ -557,12 +558,11 @@ def main():
     pipe = Out_unet_to_nii()
     pipe.generate_predicted_nii(
         index=9,
-        smoothing_cfg=SmoothingConfig(method="z_gaussian", z_sigma = 1.0),
-        threshold_cfg=ThresholdConfig(method="global", t=0.5),
+        smoothing_cfg=SmoothingConfig(method="gaussian_3d", sigma_xyz = 1.0),
+        threshold_cfg=ThresholdConfig(method="hysteresis", low=0.3, high=0.6),
         cc_cfg=CCFilterConfig(connectivity=26, min_volume_cm3=0.5, keep_top_n=None),
     )
-
-
+    print(Out_unet_to_nii.eval_diff_volume_relative("data/nii_pre_unet/segmentation-9.nii","data/nii_predicted/seg_predicted-9.nii"))
 
 if __name__ == "__main__":
     main()
