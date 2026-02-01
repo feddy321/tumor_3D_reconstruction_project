@@ -74,7 +74,7 @@ class Out_unet_to_nii:
       - Probability maps from UNet: data/maps_post_unet/post_unet_{index}(.npy/.npz/.pkl)
         Expected shape: (nb_slices, H, W) with float values in [0,1]
       - Reference input NIfTI: data/nii_pre_unet/volume-{index}.nii
-      - Ground truth NIfTI: data/nii_pre_unet/seg_gt-{index}.nii
+      - Ground truth NIfTI: data/nii_pre_unet/segmentation-{index}.nii
 
     Output:
       - Predicted binary NIfTI: data/nii_predicted/seg_predicted-{index}.nii
@@ -87,7 +87,7 @@ class Out_unet_to_nii:
         nii_out_dir: str = "data/nii_predicted",
         maps_prefix: str = "post_unet_",
         ref_prefix: str = "volume-",
-        gt_prefix: str = "seg_gt-",
+        gt_prefix: str = "segmentation-",
         out_prefix: str = "seg_predicted-",
         nii_ext: str = ".nii",
     ):
@@ -232,6 +232,7 @@ class Out_unet_to_nii:
             csum = np.cumsum(p_pad, axis=2, dtype=np.float64)
             # window sum: csum[z+w] - csum[z]
             out = (csum[:, :, w:] - csum[:, :, :-w]) / float(w)
+            print("out shape:", out.shape)
             return np.clip(out.astype(np.float32), 0.0, 1.0)
 
         if method == "z_gaussian":
@@ -547,3 +548,21 @@ class Out_unet_to_nii:
             "diff_mm3": diff_mm3,
             "rel_diff": rel_diff,
         }
+
+
+
+
+
+def main():
+    pipe = Out_unet_to_nii()
+    pipe.generate_predicted_nii(
+        index=9,
+        smoothing_cfg=SmoothingConfig(method="z_gaussian", z_sigma = 1.0),
+        threshold_cfg=ThresholdConfig(method="global", t=0.5),
+        cc_cfg=CCFilterConfig(connectivity=26, min_volume_cm3=0.5, keep_top_n=None),
+    )
+
+
+
+if __name__ == "__main__":
+    main()

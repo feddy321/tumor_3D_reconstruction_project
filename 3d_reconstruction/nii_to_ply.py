@@ -132,7 +132,7 @@ def binary_to_mesh_ply(
 # Main execution
 
 
-nii = load_nii("data/segmentation-9.nii")
+nii = load_nii("data/nii_predicted/seg_predicted-9.nii")
 print(nibabel.aff2axcodes(nii.affine)) #('Left/Right', 'Anterior/Posterior', 'Superior/Inferior')
 print(nii.header.get_zooms())  # voxel spacing (mm) : x, y, z
 
@@ -149,5 +149,5 @@ print(comptes)
 binary_to_mesh_ply(
         binary_xyz=volume,
         spacing_xyz=nii.header.get_zooms()[:3],   # (x,y,z)
-        out_ply_path="meshes_out/tumor_mesh.ply"
+        out_ply_path="data/meshes_out/tumor_mesh.ply"
     )
