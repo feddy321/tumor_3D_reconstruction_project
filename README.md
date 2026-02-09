@@ -1,71 +1,65 @@
-# 2nd Part : 3D Surface Reconstruction from Binary Medical Masks (NIfTI → PLY)
+# Medical Image Segmentation & 3D Reconstruction
 
-In this part we convert 3D binary segmentation masks (e.g., tumor masks) into smooth 3D triangular surface meshes using a standard medical-imaging pipeline:
+This project implements an end-to-end pipeline for medical image analysis, specifically focusing on **Liver Tumor Segmentation** using CT scans (LiTS dataset). The workflow consists of two main stages:
+
+1. **Deep Learning Segmentation:** Using a U-Net architecture optimized with Optuna to generate binary masks.
+2. **3D Surface Reconstruction:** Converting binary NIfTI masks into 3D meshes (PLY) using Marching Cubes.
+
 
 ---
 
-## 1 Data Model: Voxels, Masks, and Geometry
+## Project Pipeline
 
-A segmentation mask is a 3D array where each element (a voxel) indicates whether it belongs to the structure of interest.
+### Part 1: Deep Learning Segmentation (U-Net)
 
-- `mask[x, y, z] = 1` → inside the target (tumor / liver / etc.)
-- `mask[x, y, z] = 0` → background
+We utilize a U-Net architecture implemented in PyTorch to perform semantic segmentation on CT slices.
 
-Medical volumes are sampled on a physical grid. Each voxel corresponds to a real-world size:
+* **Model:** Standard U-Net with bilinear upsampling.
+* **Optimization:** Hyperparameters (Learning rate, weight decay, batch size) were tuned using **Optuna** with a TPE Sampler and Median Pruner.
+* **Tracking:** Experiment tracking and visualization were handled via **WandB**.
+* **Inference:** The best model is selected based on the Dice Coefficient. We identify the "Best", "Second Best", and "Mean-close" cases from the test set for analysis.
 
-- `spacing = (sx, sy, sz)` in millimeters
+### Part 2: 3D Surface Reconstruction (NIfTI → PLY)
 
-Correct spacing matters: if you ignore it, the resulting mesh will be geometrically distorted.
+Once the segmentation masks are generated, we convert them into 3D geometric surfaces.
 
-A NIfTI file can also provide an affine matrix that maps voxel indices to scanner/world coordinates (mm).  
-This includes:
-- scaling (spacing),
-- axis flips/rotations (orientation),
-- translation (origin).
+**1. Data Model:**
 
-Many workflows extract a mesh using spacing only (mesh is in a consistent local mm-scale), while advanced workflows apply the full affine to position the mesh in scanner coordinates.
+* Input: 3D Binary Segmentation Masks (NIfTI).
+* Voxel values: `1` (Tumor/Organ), `0` (Background).
+* Physicality: We respect voxel spacing `(sx, sy, sz)` to ensure the mesh has correct real-world dimensions (mm).
 
----
+**2. Marching Cubes Algorithm:**
+We use the **Marching Cubes** algorithm (Lorensen & Cline, 1987) to extract a triangular surface from the voxel grid.
 
-## 2 From Binary Volume to Surface: Marching Cubes
+* It iterates through the 3D scalar field.
+* It determines triangle configurations based on an isosurface threshold (typically 0.5 for binary masks).
+* **Output:** Vertices and Faces.
 
-Marching Cubes is a classic algorithm (Lorensen & Cline, 1987) that extracts a polygonal (triangular) surface from a 3D scalar field.
+**3. Mesh Post-Processing:**
+Raw meshes from Marching Cubes often contain artifacts. We apply:
 
-For each small cube of 8 neighboring voxels, it:
-1. checks which corners are inside/outside the object with respect to an isosurface threshold,
-2. interpolates where the surface crosses cube edges,
-3. emits one of a set of pre-defined triangle configurations.
-
-Binary masks contain values `{0, 1}`.  
-Using an iso-level of `0.5` ensures the extracted surface lies between background and foreground.
-
-Marching Cubes returns:
-- vertices (3D points in mm if spacing is used),
-- faces (triplets of indices defining triangles),
-- optionally normals and scalar values.
-
-This mesh is typically dense and can contain discretization artifacts.
+* **Cleaning:** Removing degenerate triangles and duplicate vertices.
+* **Smoothing:** Taubin smoothing is preferred over Laplacian smoothing to preserve volume while removing "stair-step" aliasing.
+* **Decimation:** Quadric decimation to reduce triangle count for efficient rendering.
 
 ---
 
-## 3 Mesh Post-Processing (Optional but Recommended)
+## Repository Structure
 
-Even after volumetric cleaning, the extracted mesh may contain:
-- jagged edges ("stair-step" aliasing),
-- tiny disconnected fragments,
-- degenerate / duplicated triangles,
-- non-manifold edges.
-
-Typical cleanup steps include:
-- removing degenerate triangles,
-- removing duplicate vertices/triangles,
-- removing non-manifold edges (optional; can alter topology in rare cases).
-
-A common issue is that Laplacian smoothing tends to shrink meshes. Taubin smoothing mitigates this by alternating two smoothing steps with opposite signs (`lambda`, `mu`), producing smoother surfaces while preserving volume better.
-
-Marching Cubes often produces many triangles. Quadric decimation reduces triangle count while preserving overall shape, improving:
-- rendering performance,
-- file size,
-- downstream processing speed.
+* **`train.ipynb`**: The main training loop. Loads the LiTS dataset, initializes the U-Net, logs to WandB, and saves checkpoints.
+* **`hyperpara_opti.ipynb`**: Contains the Optuna study to find the best hyperparameters (learning rate, etc.) by maximizing the validation Dice score.
+* **`inference_unet.ipynb`**: Loads the trained model (`trial-37_best.pth`), performs inference on the test set, calculates Dice scores, and saves the resulting segmentation maps.
+* **`3d_reconstruction/`**: All the code for the 3D reconstruction part.
+* **`dataset/`**: Scripts to load and wrap the dataset.
+* **`unet/`**: Source code for the U-Net architecture.
+* **`utility/`**: Miscellaneous code, image logging, computing dice scores...
 
 
+---
+
+## Project Report
+
+For a detailed analysis of the methodology, mathematical background, and extensive results, please refer to our full project report:
+
+**[Click here](./Tumor_3D_reconstruction.pdf)**
